@@ -1,0 +1,6 @@
+anthropic
+schedule
+python-dotenv
+requests
+pandas
+numpy

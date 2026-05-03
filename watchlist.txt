@@ -1,0 +1,7 @@
+# Watchlist Finviz — Semaine du 03/05/2026
+# Copie ici tes tickers depuis Finviz (un par ligne)
+# Les lignes commencant par # sont ignorees
+
+AAPL
+NVDA
+MRAM
