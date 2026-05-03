@@ -5,26 +5,19 @@ import schedule
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import anthropic
+import yfinance as yf
 
 load_dotenv()
 
 # ============================================================
 # CONFIG
 # ============================================================
-ALPACA_API_KEY    = os.getenv("ALPACA_API_KEY")
-ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID  = os.getenv("TELEGRAM_CHAT_ID")
 CLAUDE_API_KEY    = os.getenv("CLAUDE_API_KEY")
-
-ALPACA_BASE_URL   = "https://data.alpaca.markets/v2"
-ALPACA_HEADERS    = {
-    "APCA-API-KEY-ID": ALPACA_API_KEY,
-    "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-}
 
 claude_client  = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 WATCHLIST_FILE = "watchlist.txt"
@@ -80,22 +73,32 @@ def reset_alerted():
     print("[Alertes] Remise a zero")
 
 # ============================================================
-# DONNÉES BARS
+# DONNÉES VIA YAHOO FINANCE (100% gratuit)
 # ============================================================
-def get_bars(symbol: str, limit: int = 60):
-    url    = f"{ALPACA_BASE_URL}/stocks/{symbol}/bars"
-    params = {"timeframe": "1Day", "limit": limit, "feed": "iex"}
+def get_bars(symbol: str) -> pd.DataFrame:
     try:
-        r    = requests.get(url, headers=ALPACA_HEADERS, params=params, timeout=10)
-        data = r.json()
-        bars = data.get("bars", [])
-        if not bars or len(bars) < 20:
+        ticker = yf.Ticker(symbol)
+        df     = ticker.history(period="3mo", interval="1d")
+
+        if df is None or len(df) < 20:
             return None
-        df = pd.DataFrame(bars)
-        df["t"] = pd.to_datetime(df["t"])
-        df = df.rename(columns={"o":"open","h":"high","l":"low","c":"close","v":"volume"})
+
+        df = df.rename(columns={
+            "Open":   "open",
+            "High":   "high",
+            "Low":    "low",
+            "Close":  "close",
+            "Volume": "volume"
+        })
+        df = df[["open", "high", "low", "close", "volume"]].copy()
+        df = df.dropna()
+
+        if len(df) < 20:
+            return None
+
         return df
-    except:
+    except Exception as e:
+        print(f"  -> Yahoo Finance erreur {symbol}: {e}")
         return None
 
 # ============================================================
@@ -284,7 +287,7 @@ VERDICT : [GO / ATTENDRE / REJET] car [Raison courte]"""
         return f"Erreur Claude: {e}"
 
 # ============================================================
-# MODE DIMANCHE — Score et classe TOUTES les actions
+# MODE DIMANCHE
 # ============================================================
 def mode_dimanche():
     now     = datetime.now()
@@ -324,12 +327,10 @@ def mode_dimanche():
             print(f"  -> Erreur: {e}")
             continue
 
-        # Deja en breakout — on note mais on score quand meme
         if ind["breakout"]:
             deja_break.append(symbol)
             print(f"  -> Deja en breakout !")
 
-        # Score TOUTES les actions sans exception
         score, details = calculate_breakout_score(ind)
         analyse        = analyse_claude(symbol)
 
@@ -348,20 +349,16 @@ def mode_dimanche():
     # Trie par score decroissant
     resultats.sort(key=lambda x: x["score"], reverse=True)
 
-    # ---- RAPPORT TELEGRAM ----
-
     # 1. Classement rapide
-    classement = f"*CLASSEMENT BREAKOUT — {now.strftime('%d/%m/%Y')}*\n"
+    classement  = f"*CLASSEMENT BREAKOUT — {now.strftime('%d/%m/%Y')}*\n"
     classement += f"_{len(resultats)} actions analysees_\n\n"
-
-    numeros = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+    numeros     = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
 
     for i, r in enumerate(resultats):
         num   = numeros[i] if i < len(numeros) else f"{i+1}."
         label = score_label(r["score"])
         fire  = "🔥" if r["score"] >= 7 else ("⚡" if r["score"] >= 5 else "👀")
         brk   = " ⚠️ DEJA EN BREAKOUT" if r["breakout"] else ""
-
         classement += (
             f"{num} *{r['symbol']}* — {r['score']}/10 {fire} {label}{brk}\n"
             f"     ${r['ind']['price']} | "
@@ -409,7 +406,7 @@ def mode_dimanche():
     print(f"\nMode dimanche termine ! {len(resultats)} actions scorees.")
 
 # ============================================================
-# MODE SEMAINE — Surveillance breakout
+# MODE SEMAINE
 # ============================================================
 def mode_surveillance():
     now     = datetime.now()
@@ -463,7 +460,7 @@ def mode_surveillance():
             alerts_sent += 1
             time.sleep(2)
 
-        time.sleep(0.3)
+        time.sleep(0.5)
 
     if alerts_sent == 0:
         print(f"  Aucun breakout detecte.")
@@ -481,7 +478,7 @@ def main():
     print(f"Jour : {now.strftime('%A %d/%m/%Y %H:%M')}")
 
     if weekday == 6:
-        print("Mode : DIMANCHE — Scoring complet de toutes les actions")
+        print("Mode : DIMANCHE — Scoring complet")
         mode_dimanche()
 
     elif weekday < 5:
