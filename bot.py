@@ -5,7 +5,7 @@ import schedule
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 import anthropic
 import yfinance as yf
@@ -15,9 +15,9 @@ load_dotenv()
 # ============================================================
 # CONFIG
 # ============================================================
-TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID  = os.getenv("TELEGRAM_CHAT_ID")
-CLAUDE_API_KEY    = os.getenv("CLAUDE_API_KEY")
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+CLAUDE_API_KEY   = os.getenv("CLAUDE_API_KEY")
 
 claude_client  = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 WATCHLIST_FILE = "watchlist.txt"
@@ -50,11 +50,11 @@ def load_watchlist() -> list:
         return tickers
     except:
         print(f"[Watchlist] Fichier introuvable !")
-        send_telegram("Fichier watchlist.txt introuvable ! Cree-le et relance le bot.")
+        send_telegram("Fichier watchlist.txt introuvable !")
         return []
 
 # ============================================================
-# ALERTES DEJA ENVOYEES
+# ALERTES
 # ============================================================
 def load_alerted() -> dict:
     try:
@@ -73,33 +73,100 @@ def reset_alerted():
     print("[Alertes] Remise a zero")
 
 # ============================================================
-# DONNÉES VIA YAHOO FINANCE (100% gratuit)
+# DONNÉES YAHOO FINANCE — PRIX
 # ============================================================
 def get_bars(symbol: str) -> pd.DataFrame:
     try:
         ticker = yf.Ticker(symbol)
         df     = ticker.history(period="3mo", interval="1d")
-
         if df is None or len(df) < 20:
             return None
-
         df = df.rename(columns={
-            "Open":   "open",
-            "High":   "high",
-            "Low":    "low",
-            "Close":  "close",
-            "Volume": "volume"
+            "Open": "open", "High": "high",
+            "Low": "low", "Close": "close", "Volume": "volume"
         })
-        df = df[["open", "high", "low", "close", "volume"]].copy()
-        df = df.dropna()
-
-        if len(df) < 20:
-            return None
-
-        return df
-    except Exception as e:
-        print(f"  -> Yahoo Finance erreur {symbol}: {e}")
+        df = df[["open", "high", "low", "close", "volume"]].dropna()
+        return df if len(df) >= 20 else None
+    except:
         return None
+
+# ============================================================
+# DONNÉES YAHOO FINANCE — FONDAMENTAUX
+# ============================================================
+def get_fundamentals(symbol: str) -> dict:
+    try:
+        ticker = yf.Ticker(symbol)
+        info   = ticker.info
+
+        # Earnings date
+        earnings_date = "Inconnue"
+        try:
+            cal = ticker.calendar
+            if cal is not None and not cal.empty:
+                ed = cal.iloc[0, 0] if hasattr(cal, 'iloc') else None
+                if ed:
+                    earnings_date = pd.Timestamp(ed).strftime("%d/%m/%Y")
+                    # Calcul jours restants
+                    jours = (pd.Timestamp(ed) - pd.Timestamp.now()).days
+                    if jours <= 5:
+                        earnings_date += f" ⚠️ RISQUE ELEVE ({jours}j)"
+        except:
+            pass
+
+        # Données institutionnelles
+        inst_ownership = info.get("institutionOwnership", None)
+        inst_pct       = f"{round(inst_ownership * 100, 1)}%" if inst_ownership else "N/A"
+
+        # Infos fondamentales
+        market_cap  = info.get("marketCap", 0)
+        market_cap  = f"${round(market_cap/1e6)}M" if market_cap else "N/A"
+
+        short_float = info.get("shortPercentOfFloat", None)
+        short_float = f"{round(short_float * 100, 1)}%" if short_float else "N/A"
+
+        revenue_growth = info.get("revenueGrowth", None)
+        revenue_growth = f"+{round(revenue_growth * 100, 1)}%" if revenue_growth else "N/A"
+
+        earnings_growth = info.get("earningsGrowth", None)
+        earnings_growth = f"+{round(earnings_growth * 100, 1)}%" if earnings_growth else "N/A"
+
+        sector   = info.get("sector", "N/A")
+        industry = info.get("industry", "N/A")
+
+        # News recentes Yahoo
+        news_summary = "Aucune news recente"
+        try:
+            news = ticker.news
+            if news and len(news) > 0:
+                titres = [n.get("title", "") for n in news[:3]]
+                news_summary = " | ".join(titres)
+        except:
+            pass
+
+        return {
+            "earnings_date":  earnings_date,
+            "inst_ownership": inst_pct,
+            "market_cap":     market_cap,
+            "short_float":    short_float,
+            "revenue_growth": revenue_growth,
+            "earnings_growth": earnings_growth,
+            "sector":         sector,
+            "industry":       industry,
+            "news_summary":   news_summary
+        }
+
+    except Exception as e:
+        return {
+            "earnings_date":   "N/A",
+            "inst_ownership":  "N/A",
+            "market_cap":      "N/A",
+            "short_float":     "N/A",
+            "revenue_growth":  "N/A",
+            "earnings_growth": "N/A",
+            "sector":          "N/A",
+            "industry":        "N/A",
+            "news_summary":    "N/A"
+        }
 
 # ============================================================
 # INDICATEURS TECHNIQUES
@@ -123,7 +190,6 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     current_volume = volume.iloc[-1]
     rel_volume     = current_volume / avg_volume if avg_volume > 0 else 0
 
-    # Compression volume 5 derniers jours
     vol_5j       = volume.tail(5).mean()
     vol_compress = vol_5j / avg_volume if avg_volume > 0 else 1
 
@@ -132,19 +198,14 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     monthly_vol = returns.rolling(20).std().iloc[-1] * np.sqrt(20) * 100 if len(returns) >= 20 else 0
     adr         = ((df["high"] - df["low"]) / df["close"]).rolling(20).mean().iloc[-1] * 100
 
-    current_price = close.iloc[-1]
-
-    # Range 10 jours
+    current_price       = close.iloc[-1]
     last_10             = df.tail(10)
     range_high          = last_10["high"].max()
     range_low           = last_10["low"].min()
     consolidation_range = ((range_high - range_low) / range_low) * 100
     is_consolidating    = consolidation_range < 8
-
-    # Distance au range high
     distance_range_high = ((range_high - current_price) / range_high) * 100
 
-    # Jours consecutifs dans le range
     jours_conso = 0
     for i in range(len(df) - 1, -1, -1):
         h = df["high"].iloc[i]
@@ -181,13 +242,12 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     }
 
 # ============================================================
-# SCORE PROXIMITE BREAKOUT (0 a 10)
+# SCORE PROXIMITE BREAKOUT
 # ============================================================
 def calculate_breakout_score(ind: dict) -> tuple[int, list]:
     score   = 0
     details = []
 
-    # 1. Distance au range high (max 3 pts)
     dist = ind["distance_range_high"]
     if dist <= 1.0:
         score += 3
@@ -201,7 +261,6 @@ def calculate_breakout_score(ind: dict) -> tuple[int, list]:
     else:
         details.append(f"Prix a {dist}% du range high (LOIN)")
 
-    # 2. Compression du volume (max 2 pts)
     compress = ind["vol_compress"]
     if compress <= 0.6:
         score += 2
@@ -212,7 +271,6 @@ def calculate_breakout_score(ind: dict) -> tuple[int, list]:
     else:
         details.append(f"Volume normal ({int(compress*100)}%)")
 
-    # 3. Jours de consolidation (max 2 pts)
     jours = ind["jours_conso"]
     if 5 <= jours <= 10:
         score += 2
@@ -226,7 +284,6 @@ def calculate_breakout_score(ind: dict) -> tuple[int, list]:
     else:
         details.append(f"Consolidation trop courte : {jours} jours")
 
-    # 4. Resserrement du range (max 2 pts)
     conso = ind["consolidation_range"]
     if conso <= 4:
         score += 2
@@ -235,9 +292,8 @@ def calculate_breakout_score(ind: dict) -> tuple[int, list]:
         score += 1
         details.append(f"Range serre : {conso}%")
     else:
-        details.append(f"Range large : {conso}% (pas encore en conso)")
+        details.append(f"Range large : {conso}%")
 
-    # 5. SMA alignees (max 1 pt)
     if ind["sma20_trending_up"] and ind["sma50_trending_up"]:
         score += 1
         details.append("SMA20 & SMA50 pointent vers le haut")
@@ -246,9 +302,6 @@ def calculate_breakout_score(ind: dict) -> tuple[int, list]:
 
     return score, details
 
-# ============================================================
-# LABEL DU SCORE
-# ============================================================
 def score_label(score: int) -> str:
     if score >= 9:
         return "BREAKOUT IMMINENT"
@@ -260,25 +313,36 @@ def score_label(score: int) -> str:
         return "PAS ENCORE PRET"
 
 # ============================================================
-# ANALYSE CLAUDE
+# ANALYSE CLAUDE + DONNÉES YAHOO
 # ============================================================
-def analyse_claude(symbol: str) -> str:
+def analyse_claude(symbol: str, fund: dict) -> str:
     prompt = f"""Tu es un expert en Swing Trading sur Small Caps US. Analyse l'action [{symbol}] selon ma strategie stricte. Ne me donne pas de conseils financiers, donne-moi un diagnostic factuel.
 
-1. Transactions Institutionnelles : Le solde des transactions sur les 3 derniers mois est-il positif ou negatif ?
-2. Calendrier Macro & Earnings : Quelle est la date du prochain rapport de resultats ? (Si < 5 jours, signale un risque eleve). Y a-t-il une annonce FED ou CPI dans les 48h ?
-3. Catalyseur de News : Y a-t-il une news specifique dans les 48h (contrat, FDA, partenariat) ou est-ce purement technique ?
+Voici les donnees reelles de l'action :
+- Secteur : {fund['sector']} | Industrie : {fund['industry']}
+- Market Cap : {fund['market_cap']}
+- Croissance revenus : {fund['revenue_growth']}
+- Croissance benefices : {fund['earnings_growth']}
+- Ownership institutionnel : {fund['inst_ownership']}
+- Short Float : {fund['short_float']}
+- Prochain Earnings : {fund['earnings_date']}
+- News recentes : {fund['news_summary']}
+
+Sur la base de ces donnees reelles :
+1. Les institutions sont-elles acheteuses ou vendeuses ?
+2. Le calendrier Earnings represente-t-il un risque cette semaine ?
+3. Y a-t-il un catalyseur news identifiable ou c'est purement technique ?
 
 Format STRICT :
 SCORE DE CONFIANCE : /10
 INSTITUTIONS : [Achat/Vente/Neutre]
-RISQUE CALENDRIER : [Date Earnings / News Fed]
-CATALYSEUR : [News ou Technique pur]
+RISQUE CALENDRIER : {fund['earnings_date']}
+CATALYSEUR : [Resume en 1 phrase]
 VERDICT : [GO / ATTENDRE / REJET] car [Raison courte]"""
 
     try:
         message = claude_client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-sonnet-4-6",
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -306,15 +370,15 @@ def mode_dimanche():
     )
 
     reset_alerted()
-
     resultats  = []
-    deja_break = []
     erreurs    = []
 
     for i, symbol in enumerate(tickers):
         print(f"  [{i+1}/{len(tickers)}] {symbol}...")
 
-        df = get_bars(symbol)
+        df   = get_bars(symbol)
+        fund = get_fundamentals(symbol)
+
         if df is None:
             erreurs.append(symbol)
             print(f"  -> Donnees insuffisantes")
@@ -327,18 +391,15 @@ def mode_dimanche():
             print(f"  -> Erreur: {e}")
             continue
 
-        if ind["breakout"]:
-            deja_break.append(symbol)
-            print(f"  -> Deja en breakout !")
-
         score, details = calculate_breakout_score(ind)
-        analyse        = analyse_claude(symbol)
+        analyse        = analyse_claude(symbol, fund)
 
         resultats.append({
             "symbol":   symbol,
             "score":    score,
             "details":  details,
             "ind":      ind,
+            "fund":     fund,
             "analyse":  analyse,
             "breakout": ind["breakout"]
         })
@@ -346,7 +407,6 @@ def mode_dimanche():
         print(f"  -> Score: {score}/10 — {score_label(score)}")
         time.sleep(1)
 
-    # Trie par score decroissant
     resultats.sort(key=lambda x: x["score"], reverse=True)
 
     # 1. Classement rapide
@@ -356,11 +416,10 @@ def mode_dimanche():
 
     for i, r in enumerate(resultats):
         num   = numeros[i] if i < len(numeros) else f"{i+1}."
-        label = score_label(r["score"])
         fire  = "🔥" if r["score"] >= 7 else ("⚡" if r["score"] >= 5 else "👀")
-        brk   = " ⚠️ DEJA EN BREAKOUT" if r["breakout"] else ""
+        brk   = " ⚠️ BREAKOUT" if r["breakout"] else ""
         classement += (
-            f"{num} *{r['symbol']}* — {r['score']}/10 {fire} {label}{brk}\n"
+            f"{num} *{r['symbol']}* — {r['score']}/10 {fire} {score_label(r['score'])}{brk}\n"
             f"     ${r['ind']['price']} | "
             f"A {r['ind']['distance_range_high']}% du breakout | "
             f"{r['ind']['jours_conso']}j conso\n"
@@ -369,12 +428,13 @@ def mode_dimanche():
     send_telegram(classement)
     time.sleep(2)
 
-    # 2. Fiche complete de chaque action
+    # 2. Fiche complete
     for r in resultats:
-        s   = r["symbol"]
-        ind = r["ind"]
-        det = "\n".join([f"  • {d}" for d in r["details"]])
-        brk = "⚠️ DEJA EN BREAKOUT — surveille quand meme\n\n" if r["breakout"] else ""
+        s    = r["symbol"]
+        ind  = r["ind"]
+        fund = r["fund"]
+        det  = "\n".join([f"  • {d}" for d in r["details"]])
+        brk  = "⚠️ DEJA EN BREAKOUT\n\n" if r["breakout"] else ""
 
         msg = (
             f"*{s}* — Score {r['score']}/10 — {score_label(r['score'])}\n"
@@ -383,24 +443,29 @@ def mode_dimanche():
             f"*Technique :*\n"
             f"Prix: ${ind['price']} | RSI: {ind['rsi']}\n"
             f"Range: ${ind['range_low']} → ${ind['range_high']}\n"
-            f"Consolidation: {ind['consolidation_range']}% sur {ind['jours_conso']}j\n"
+            f"Conso: {ind['consolidation_range']}% sur {ind['jours_conso']}j\n"
             f"SMA20: {'↑' if ind['sma20_trending_up'] else '↓'} | "
             f"SMA50: {'↑' if ind['sma50_trending_up'] else '↓'}\n"
-            f"Perf mois: +{ind['perf_month']}% | ADR: {ind['adr']}% | Vol: {ind['rel_volume']}x\n\n"
+            f"Perf mois: +{ind['perf_month']}% | ADR: {ind['adr']}%\n\n"
+            f"*Fondamentaux (Yahoo Finance) :*\n"
+            f"Secteur: {fund['sector']}\n"
+            f"Market Cap: {fund['market_cap']} | Short: {fund['short_float']}\n"
+            f"Revenus: {fund['revenue_growth']} | Benefices: {fund['earnings_growth']}\n"
+            f"Institutions: {fund['inst_ownership']}\n"
+            f"Earnings: {fund['earnings_date']}\n"
+            f"News: {fund['news_summary'][:100]}...\n\n"
             f"*Analyse IA :*\n{r['analyse']}\n\n"
             f"_RS Line a verifier sur Finviz !_"
         )
         send_telegram(msg)
         time.sleep(3)
 
-    # 3. Message de fin
     top3 = [r["symbol"] for r in resultats[:3]]
     send_telegram(
         f"*Analyse terminee !*\n\n"
-        f"Top 3 a surveiller cette semaine :\n"
+        f"Top 3 cette semaine :\n"
         f"*{' | '.join(top3)}*\n\n"
-        f"Le bot surveille automatiquement du lundi au vendredi.\n"
-        f"Tu recevras une alerte des qu'un breakout est confirme !"
+        f"Surveillance automatique lundi-vendredi !"
     )
 
     print(f"\nMode dimanche termine ! {len(resultats)} actions scorees.")
@@ -435,20 +500,21 @@ def mode_surveillance():
 
         if ind["breakout"]:
             print(f"  BREAKOUT : {symbol} !")
-            analyse = analyse_claude(symbol)
+            fund    = get_fundamentals(symbol)
+            analyse = analyse_claude(symbol, fund)
 
             message = (
                 f"\U0001F6A8 *BREAKOUT CONFIRME : {symbol}*\n"
                 f"\u23F0 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
                 f"\U0001F4CA *TECHNIQUE*\n"
-                f"\U0001F4B0 Prix: ${ind['price']}\n"
-                f"\u26A1 RSI: {ind['rsi']}\n"
-                f"\U0001F4E6 Volume: {ind['rel_volume']}x la normale\n"
-                f"\U0001F4C8 SMA20 {'↑' if ind['sma20_trending_up'] else '↓'} | "
-                f"SMA50 {'↑' if ind['sma50_trending_up'] else '↓'}\n"
-                f"\U0001F525 Perf mois: +{ind['perf_month']}%\n"
-                f"\U0001F513 Cassure: ${ind['range_high']} explose !\n"
-                f"Volume: {ind['rel_volume']}x\n\n"
+                f"Prix: ${ind['price']} | RSI: {ind['rsi']}\n"
+                f"Volume: {ind['rel_volume']}x la normale\n"
+                f"SMA20 {'↑' if ind['sma20_trending_up'] else '↓'} | SMA50 {'↑' if ind['sma50_trending_up'] else '↓'}\n"
+                f"Cassure: ${ind['range_high']} explose !\n\n"
+                f"\U0001F4C8 *FONDAMENTAUX*\n"
+                f"Earnings: {fund['earnings_date']}\n"
+                f"Institutions: {fund['inst_ownership']}\n"
+                f"News: {fund['news_summary'][:80]}...\n\n"
                 f"\U0001F9E0 *ANALYSE IA*\n"
                 f"{analyse}\n\n"
                 f"_Confirme l'entree sur le 30min !_"
@@ -478,11 +544,11 @@ def main():
     print(f"Jour : {now.strftime('%A %d/%m/%Y %H:%M')}")
 
     if weekday == 6:
-        print("Mode : DIMANCHE — Scoring complet")
+        print("Mode : DIMANCHE")
         mode_dimanche()
 
     elif weekday < 5:
-        print("Mode : SEMAINE — Surveillance breakout toutes les 30min")
+        print("Mode : SEMAINE — Surveillance toutes les 30min")
 
         if weekday == 0:
             reset_alerted()
@@ -502,7 +568,6 @@ def main():
 
     else:
         print("Mode : SAMEDI — Bot en pause")
-        print("Mets a jour watchlist.txt depuis Finviz et relance dimanche !")
 
 if __name__ == "__main__":
     main()
