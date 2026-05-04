@@ -98,9 +98,8 @@ def get_fundamentals(symbol: str) -> dict:
         ticker = yf.Ticker(symbol)
         info   = ticker.info
 
-        # Earnings date
-        earnings_date  = "Inconnue"
-        earnings_risk  = False
+        earnings_date = "Inconnue"
+        earnings_risk = False
         try:
             cal = ticker.calendar
             if cal is not None and not cal.empty:
@@ -115,21 +114,16 @@ def get_fundamentals(symbol: str) -> dict:
 
         inst_ownership  = info.get("institutionOwnership", None)
         inst_pct        = f"{round(inst_ownership * 100, 1)}%" if inst_ownership else "N/A"
-
         market_cap      = info.get("marketCap", 0)
         market_cap_str  = f"${round(market_cap/1e6)}M" if market_cap else "N/A"
-
         short_float     = info.get("shortPercentOfFloat", None)
         short_float_str = f"{round(short_float * 100, 1)}%" if short_float else "N/A"
-
         revenue_growth  = info.get("revenueGrowth", None)
         rev_str         = f"+{round(revenue_growth * 100, 1)}%" if revenue_growth else "N/A"
-
         earnings_growth = info.get("earningsGrowth", None)
         earn_str        = f"+{round(earnings_growth * 100, 1)}%" if earnings_growth else "N/A"
-
-        sector   = info.get("sector", "N/A")
-        industry = info.get("industry", "N/A")
+        sector          = info.get("sector", "N/A")
+        industry        = info.get("industry", "N/A")
 
         news_items = []
         try:
@@ -151,8 +145,7 @@ def get_fundamentals(symbol: str) -> dict:
             "industry":        industry,
             "news_items":      news_items
         }
-
-    except Exception as e:
+    except:
         return {
             "earnings_date":   "N/A",
             "earnings_risk":   False,
@@ -204,6 +197,10 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     is_consolidating    = consolidation_range < 8
     distance_range_high = ((range_high - current_price) / range_high) * 100
 
+    # Variation du jour
+    open_price  = df["open"].iloc[-1]
+    day_change  = ((current_price - open_price) / open_price) * 100
+
     jours_conso = 0
     for i in range(len(df) - 1, -1, -1):
         h = df["high"].iloc[i]
@@ -219,24 +216,25 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     )
 
     return {
-        "price":              round(current_price, 2),
-        "sma20":              round(sma20, 2),
-        "sma50":              round(sma50, 2),
-        "sma20_trending_up":  bool(sma20 > sma20_prev),
-        "sma50_trending_up":  bool(sma50 > sma50_prev),
-        "rsi":                round(rsi, 1),
-        "rel_volume":         round(rel_volume, 2),
-        "vol_compress":       round(vol_compress, 2),
-        "perf_month":         round(perf_month, 1),
-        "monthly_vol":        round(monthly_vol, 1),
-        "adr":                round(adr, 1),
-        "consolidation_range":round(consolidation_range, 1),
-        "is_consolidating":   bool(is_consolidating),
-        "distance_range_high":round(max(distance_range_high, 0), 2),
-        "jours_conso":        jours_conso,
-        "breakout":           bool(breakout),
-        "range_high":         round(range_high, 2),
-        "range_low":          round(range_low, 2)
+        "price":               round(current_price, 2),
+        "day_change":          round(day_change, 2),
+        "sma20":               round(sma20, 2),
+        "sma50":               round(sma50, 2),
+        "sma20_trending_up":   bool(sma20 > sma20_prev),
+        "sma50_trending_up":   bool(sma50 > sma50_prev),
+        "rsi":                 round(rsi, 1),
+        "rel_volume":          round(rel_volume, 2),
+        "vol_compress":        round(vol_compress, 2),
+        "perf_month":          round(perf_month, 1),
+        "monthly_vol":         round(monthly_vol, 1),
+        "adr":                 round(adr, 1),
+        "consolidation_range": round(consolidation_range, 1),
+        "is_consolidating":    bool(is_consolidating),
+        "distance_range_high": round(max(distance_range_high, 0), 2),
+        "jours_conso":         jours_conso,
+        "breakout":            bool(breakout),
+        "range_high":          round(range_high, 2),
+        "range_low":           round(range_low, 2)
     }
 
 # ============================================================
@@ -319,7 +317,7 @@ def score_bar(score: int) -> str:
 # ANALYSE CLAUDE
 # ============================================================
 def analyse_claude(symbol: str, fund: dict) -> str:
-    prompt = f"""Tu es un expert en Swing Trading sur Small Caps US. Analyse l'action [{symbol}] selon ma strategie stricte. Ne me donne pas de conseils financiers, donne-moi un diagnostic factuel.
+    prompt = f"""Tu es un expert en Swing Trading sur Small Caps US. Analyse l'action [{symbol}]. Ne me donne pas de conseils financiers, donne-moi un diagnostic factuel.
 
 Donnees reelles Yahoo Finance :
 - Secteur : {fund['sector']} | Industrie : {fund['industry']}
@@ -331,7 +329,7 @@ Donnees reelles Yahoo Finance :
 - Prochain Earnings : {fund['earnings_date']}
 - News recentes : {' | '.join(fund['news_items']) if fund['news_items'] else 'Aucune'}
 
-Format STRICT de reponse :
+Format STRICT :
 SCORE DE CONFIANCE : /10
 INSTITUTIONS : [Achat / Vente / Neutre]
 RISQUE CALENDRIER : [Date + niveau de risque]
@@ -347,6 +345,124 @@ VERDICT : [GO / ATTENDRE / REJET] car [Raison courte]"""
         return message.content[0].text
     except Exception as e:
         return f"Erreur Claude: {e}"
+
+# ============================================================
+# RESUME DE FIN DE JOURNEE — 16h30
+# ============================================================
+def resume_fin_journee():
+    now     = datetime.now()
+    tickers = load_watchlist()
+    if not tickers:
+        return
+
+    print(f"\n[{now.strftime('%H:%M')}] Resume fin de journee en cours...")
+
+    resultats = []
+
+    for symbol in tickers:
+        df = get_bars(symbol)
+        if df is None:
+            continue
+        try:
+            ind            = calculate_indicators(df)
+            score, details = calculate_breakout_score(ind)
+            resultats.append({
+                "symbol":  symbol,
+                "score":   score,
+                "ind":     ind,
+            })
+        except:
+            continue
+        time.sleep(0.5)
+
+    # Trie par score decroissant
+    resultats.sort(key=lambda x: x["score"], reverse=True)
+
+    # ── EN-TETE ──
+    msg  = f"📊 *RAPPORT DE FIN DE JOURNEE*\n"
+    msg += f"📅 {now.strftime('%A %d/%m/%Y')} — 16h30\n"
+    msg += f"{'─'*32}\n\n"
+
+    # ── ALERTES DU JOUR ──
+    alerted   = load_alerted()
+    today     = now.strftime("%Y-%m-%d")
+    alertes_j = [s for s, d in alerted.items() if d == today]
+
+    if alertes_j:
+        msg += f"🚨 *BREAKOUTS DU JOUR :*\n"
+        for s in alertes_j:
+            msg += f"  ✅ {s}\n"
+        msg += "\n"
+    else:
+        msg += f"😴 *Aucun breakout aujourd'hui*\n\n"
+
+    # ── CLASSEMENT DU JOUR ──
+    msg += f"*🏆 CLASSEMENT ACTUEL :*\n"
+    msg += f"{'─'*32}\n"
+
+    numeros = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+
+    imminents  = []
+    surveiller = []
+    loin       = []
+
+    for i, r in enumerate(resultats):
+        s   = r["symbol"]
+        ind = r["ind"]
+        num = numeros[i] if i < len(numeros) else f"{i+1}."
+
+        # Variation du jour
+        chg       = ind["day_change"]
+        chg_emoji = "🟢" if chg >= 0 else "🔴"
+        chg_str   = f"+{chg}%" if chg >= 0 else f"{chg}%"
+
+        line = (
+            f"{num} *{s}*\n"
+            f"     {score_bar(r['score'])} {score_label(r['score'])}\n"
+            f"     💲{ind['price']} {chg_emoji} {chg_str} aujourd'hui\n"
+            f"     🎯 A {ind['distance_range_high']}% du breakout │ {ind['jours_conso']}j conso\n\n"
+        )
+
+        if r["score"] >= 7:
+            imminents.append(line)
+        elif r["score"] >= 5:
+            surveiller.append(line)
+        else:
+            loin.append(line)
+
+    if imminents:
+        msg += f"🔥 *BREAKOUT IMMINENT / TRES PROCHE :*\n"
+        for l in imminents:
+            msg += l
+
+    if surveiller:
+        msg += f"👀 *A SURVEILLER :*\n"
+        for l in surveiller:
+            msg += l
+
+    if loin:
+        msg += f"⏳ *PAS ENCORE PRETS :*\n"
+        for l in loin:
+            msg += l
+
+    # ── CONSEIL DU SOIR ──
+    msg += f"{'─'*32}\n"
+    if imminents:
+        nb = len(imminents)
+        msg += (
+            f"⚡ *{nb} action(s) tres proche(s) du breakout !*\n"
+            f"_Surveille bien l'ouverture demain matin._\n"
+            f"_Confirme toujours sur le 30min avant d'entrer._ 🚀"
+        )
+    else:
+        msg += (
+            f"😌 *Aucune action imminente ce soir.*\n"
+            f"_Le marche consolide, c'est bon signe._\n"
+            f"_La tension monte pour les prochains jours._ 💪"
+        )
+
+    send_telegram(msg)
+    print(f"[Resume] Envoye ! {len(resultats)} actions analysees.")
 
 # ============================================================
 # MODE DIMANCHE
@@ -409,16 +525,15 @@ def mode_dimanche():
 
     resultats.sort(key=lambda x: x["score"], reverse=True)
 
-    # ── 1. CLASSEMENT RAPIDE ──
-    numeros = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-
+    # Classement rapide
+    numeros    = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
     classement  = f"🏆 *CLASSEMENT BREAKOUT*\n"
     classement += f"📅 {now.strftime('%d/%m/%Y')} — {len(resultats)} actions\n"
     classement += f"{'─'*30}\n\n"
 
     for i, r in enumerate(resultats):
-        num  = numeros[i] if i < len(numeros) else f"{i+1}."
-        brk  = " 🚨" if r["breakout"] else ""
+        num = numeros[i] if i < len(numeros) else f"{i+1}."
+        brk = " 🚨" if r["breakout"] else ""
         classement += (
             f"{num} *{r['symbol']}*{brk}\n"
             f"     {score_bar(r['score'])} {score_label(r['score'])}\n"
@@ -430,7 +545,7 @@ def mode_dimanche():
     send_telegram(classement)
     time.sleep(2)
 
-    # ── 2. FICHE COMPLETE DE CHAQUE ACTION ──
+    # Fiche complete de chaque action
     for r in resultats:
         s    = r["symbol"]
         ind  = r["ind"]
@@ -441,22 +556,15 @@ def mode_dimanche():
         sma50_arrow = "↑" if ind["sma50_trending_up"] else "↓"
         earn_risk   = " ⚠️ RISQUE" if fund["earnings_risk"] else " ✅"
 
-        # News
-        news_str = ""
-        if fund["news_items"]:
-            news_str = "\n".join([f"  • {n[:70]}..." for n in fund["news_items"]])
-        else:
-            news_str = "  • Aucune news recente"
+        news_str = "\n".join([f"  • {n[:70]}..." for n in fund["news_items"]]) if fund["news_items"] else "  • Aucune news recente"
 
         msg = (
             f"{'─'*32}\n"
             f"📊 *{s}* — {score_label(r['score'])}\n"
             f"{'─'*32}\n\n"
-
             f"*🎯 SCORE BREAKOUT*\n"
             f"`{score_bar(r['score'])}`\n"
             f"{det}\n\n"
-
             f"*📈 TECHNIQUE*\n"
             f"💲 Prix : *${ind['price']}*\n"
             f"⚡ RSI : {ind['rsi']} │ Vol : {ind['rel_volume']}x\n"
@@ -464,7 +572,6 @@ def mode_dimanche():
             f"📦 Range : ${ind['range_low']} → ${ind['range_high']}\n"
             f"⏳ Conso : {ind['consolidation_range']}% sur {ind['jours_conso']} jours\n"
             f"🔥 Perf mois : +{ind['perf_month']}% │ ADR : {ind['adr']}%\n\n"
-
             f"*💼 FONDAMENTAUX*\n"
             f"🏭 {fund['sector']} — {fund['industry']}\n"
             f"💰 Market Cap : {fund['market_cap']}\n"
@@ -472,37 +579,32 @@ def mode_dimanche():
             f"📉 Short Float : {fund['short_float']}\n"
             f"📊 Rev : {fund['revenue_growth']} │ EPS : {fund['earnings_growth']}\n"
             f"📅 Earnings : {fund['earnings_date']}{earn_risk}\n\n"
-
-            f"*📰 NEWS RECENTES*\n"
+            f"*📰 NEWS*\n"
             f"{news_str}\n\n"
-
             f"*🤖 ANALYSE IA*\n"
             f"{r['analyse']}\n\n"
-
             f"_✅ Verifie la RS Line sur Finviz avant d'entrer !_"
         )
         send_telegram(msg)
         time.sleep(3)
 
-    # ── 3. RESUME FINAL ──
-    top3 = [r["symbol"] for r in resultats[:3]]
+    top = resultats[:3]
     send_telegram(
         f"✅ *ANALYSE TERMINEE !*\n"
         f"{'─'*30}\n\n"
         f"🏅 *Top 3 de la semaine :*\n"
-        f"🥇 {resultats[0]['symbol']} — {score_label(resultats[0]['score'])}\n"
-        f"🥈 {resultats[1]['symbol'] if len(resultats) > 1 else '—'}\n"
-        f"🥉 {resultats[2]['symbol'] if len(resultats) > 2 else '—'}\n\n"
-        f"🤖 _Le bot surveille automatiquement_\n"
-        f"_du lundi au vendredi toutes les 30min._\n"
-        f"_Tu recevras une alerte des qu'un_\n"
-        f"_breakout est confirme !_ 🚀"
+        f"🥇 {top[0]['symbol'] if len(top) > 0 else '—'} — {score_label(top[0]['score']) if len(top) > 0 else ''}\n"
+        f"🥈 {top[1]['symbol'] if len(top) > 1 else '—'}\n"
+        f"🥉 {top[2]['symbol'] if len(top) > 2 else '—'}\n\n"
+        f"🤖 _Surveillance automatique lun-ven_\n"
+        f"_Rapport quotidien a 16h30 chaque jour_ 📊\n"
+        f"_Alerte immediate au breakout_ 🚨"
     )
 
     print(f"\nMode dimanche termine ! {len(resultats)} actions scorees.")
 
 # ============================================================
-# MODE SEMAINE
+# MODE SEMAINE — Surveillance breakout
 # ============================================================
 def mode_surveillance():
     now     = datetime.now()
@@ -537,38 +639,31 @@ def mode_surveillance():
             sma20_arrow = "↑" if ind["sma20_trending_up"] else "↓"
             sma50_arrow = "↑" if ind["sma50_trending_up"] else "↓"
             earn_risk   = " ⚠️ RISQUE ELEVE" if fund["earnings_risk"] else " ✅ OK"
+            news_str    = "\n".join([f"  • {n[:70]}..." for n in fund["news_items"]]) if fund["news_items"] else "  • Aucune news recente"
 
-            news_str = ""
-            if fund["news_items"]:
-                news_str = "\n".join([f"  • {n[:70]}..." for n in fund["news_items"]])
-            else:
-                news_str = "  • Aucune news recente"
+            chg     = ind["day_change"]
+            chg_str = f"+{chg}%" if chg >= 0 else f"{chg}%"
 
             message = (
                 f"🚨🚨 *BREAKOUT CONFIRME* 🚨🚨\n"
                 f"{'─'*32}\n"
                 f"📊 *{symbol}*\n"
-                f"🕐 {now.strftime('%d/%m/%Y à %H:%M')}\n"
+                f"🕐 {now.strftime('%d/%m/%Y a %H:%M')}\n"
                 f"{'─'*32}\n\n"
-
                 f"*📈 TECHNIQUE*\n"
-                f"💲 Prix : *${ind['price']}*\n"
+                f"💲 Prix : *${ind['price']}* ({chg_str} aujourd'hui)\n"
                 f"⚡ RSI : {ind['rsi']}\n"
                 f"📦 Volume : *{ind['rel_volume']}x* la normale 🔥\n"
                 f"📏 SMA20 {sma20_arrow} │ SMA50 {sma50_arrow}\n"
                 f"💥 Cassure du range : *${ind['range_high']}*\n"
                 f"📐 Perf mois : +{ind['perf_month']}%\n\n"
-
                 f"*💼 FONDAMENTAUX*\n"
                 f"🏦 Institutions : {fund['inst_ownership']}\n"
                 f"📅 Earnings : {fund['earnings_date']}{earn_risk}\n\n"
-
                 f"*📰 NEWS*\n"
                 f"{news_str}\n\n"
-
                 f"*🤖 ANALYSE IA*\n"
                 f"{analyse}\n\n"
-
                 f"{'─'*32}\n"
                 f"_⚡ Confirme l'entree sur le graphique 30min !_"
             )
@@ -601,7 +696,7 @@ def main():
         mode_dimanche()
 
     elif weekday < 5:
-        print("Mode : SEMAINE — Surveillance toutes les 30min")
+        print("Mode : SEMAINE — Surveillance + Resume 16h30")
 
         if weekday == 0:
             reset_alerted()
@@ -609,15 +704,23 @@ def main():
         send_telegram(
             f"🤖 *TRADINGBOT ACTIF*\n"
             f"{'─'*30}\n"
-            f"📋 Watchlist chargee\n"
+            f"📋 {len(load_watchlist())} actions surveillees\n"
             f"🔍 Scan toutes les 30 minutes\n"
+            f"📊 Rapport quotidien a 16h30\n"
             f"🚨 Alerte immediate au breakout !\n"
             f"{'─'*30}\n"
             f"_Bonne journee, je surveille pour toi_ 💪"
         )
 
+        # Scan immediat
         mode_surveillance()
+
+        # Scan toutes les 30 minutes
         schedule.every(30).minutes.do(mode_surveillance)
+
+        # Resume quotidien a 16h30 (heure du serveur = UTC)
+        # Railway est en UTC donc 16h30 EST = 21h30 UTC
+        schedule.every().day.at("21:30").do(resume_fin_journee)
 
         while True:
             schedule.run_pending()
