@@ -730,4 +730,4 @@ def main():
         print("Mode : SAMEDI — Bot en pause")
 
 if __name__ == "__main__":
-    main()
+    resume_fin_journee()
