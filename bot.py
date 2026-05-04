@@ -50,7 +50,7 @@ def load_watchlist() -> list:
         return tickers
     except:
         print(f"[Watchlist] Fichier introuvable !")
-        send_telegram("Fichier watchlist.txt introuvable !")
+        send_telegram("⚠️ Fichier watchlist.txt introuvable !")
         return []
 
 # ============================================================
@@ -99,65 +99,63 @@ def get_fundamentals(symbol: str) -> dict:
         info   = ticker.info
 
         # Earnings date
-        earnings_date = "Inconnue"
+        earnings_date  = "Inconnue"
+        earnings_risk  = False
         try:
             cal = ticker.calendar
             if cal is not None and not cal.empty:
                 ed = cal.iloc[0, 0] if hasattr(cal, 'iloc') else None
                 if ed:
-                    earnings_date = pd.Timestamp(ed).strftime("%d/%m/%Y")
-                    # Calcul jours restants
                     jours = (pd.Timestamp(ed) - pd.Timestamp.now()).days
+                    earnings_date = pd.Timestamp(ed).strftime("%d/%m/%Y")
                     if jours <= 5:
-                        earnings_date += f" ⚠️ RISQUE ELEVE ({jours}j)"
+                        earnings_risk = True
         except:
             pass
 
-        # Données institutionnelles
-        inst_ownership = info.get("institutionOwnership", None)
-        inst_pct       = f"{round(inst_ownership * 100, 1)}%" if inst_ownership else "N/A"
+        inst_ownership  = info.get("institutionOwnership", None)
+        inst_pct        = f"{round(inst_ownership * 100, 1)}%" if inst_ownership else "N/A"
 
-        # Infos fondamentales
-        market_cap  = info.get("marketCap", 0)
-        market_cap  = f"${round(market_cap/1e6)}M" if market_cap else "N/A"
+        market_cap      = info.get("marketCap", 0)
+        market_cap_str  = f"${round(market_cap/1e6)}M" if market_cap else "N/A"
 
-        short_float = info.get("shortPercentOfFloat", None)
-        short_float = f"{round(short_float * 100, 1)}%" if short_float else "N/A"
+        short_float     = info.get("shortPercentOfFloat", None)
+        short_float_str = f"{round(short_float * 100, 1)}%" if short_float else "N/A"
 
-        revenue_growth = info.get("revenueGrowth", None)
-        revenue_growth = f"+{round(revenue_growth * 100, 1)}%" if revenue_growth else "N/A"
+        revenue_growth  = info.get("revenueGrowth", None)
+        rev_str         = f"+{round(revenue_growth * 100, 1)}%" if revenue_growth else "N/A"
 
         earnings_growth = info.get("earningsGrowth", None)
-        earnings_growth = f"+{round(earnings_growth * 100, 1)}%" if earnings_growth else "N/A"
+        earn_str        = f"+{round(earnings_growth * 100, 1)}%" if earnings_growth else "N/A"
 
         sector   = info.get("sector", "N/A")
         industry = info.get("industry", "N/A")
 
-        # News recentes Yahoo
-        news_summary = "Aucune news recente"
+        news_items = []
         try:
             news = ticker.news
-            if news and len(news) > 0:
-                titres = [n.get("title", "") for n in news[:3]]
-                news_summary = " | ".join(titres)
+            if news:
+                news_items = [n.get("title", "") for n in news[:3]]
         except:
             pass
 
         return {
-            "earnings_date":  earnings_date,
-            "inst_ownership": inst_pct,
-            "market_cap":     market_cap,
-            "short_float":    short_float,
-            "revenue_growth": revenue_growth,
-            "earnings_growth": earnings_growth,
-            "sector":         sector,
-            "industry":       industry,
-            "news_summary":   news_summary
+            "earnings_date":   earnings_date,
+            "earnings_risk":   earnings_risk,
+            "inst_ownership":  inst_pct,
+            "market_cap":      market_cap_str,
+            "short_float":     short_float_str,
+            "revenue_growth":  rev_str,
+            "earnings_growth": earn_str,
+            "sector":          sector,
+            "industry":        industry,
+            "news_items":      news_items
         }
 
     except Exception as e:
         return {
             "earnings_date":   "N/A",
+            "earnings_risk":   False,
             "inst_ownership":  "N/A",
             "market_cap":      "N/A",
             "short_float":     "N/A",
@@ -165,7 +163,7 @@ def get_fundamentals(symbol: str) -> dict:
             "earnings_growth": "N/A",
             "sector":          "N/A",
             "industry":        "N/A",
-            "news_summary":    "N/A"
+            "news_items":      []
         }
 
 # ============================================================
@@ -221,24 +219,24 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     )
 
     return {
-        "price": round(current_price, 2),
-        "sma20": round(sma20, 2),
-        "sma50": round(sma50, 2),
-        "sma20_trending_up": bool(sma20 > sma20_prev),
-        "sma50_trending_up": bool(sma50 > sma50_prev),
-        "rsi": round(rsi, 1),
-        "rel_volume": round(rel_volume, 2),
-        "vol_compress": round(vol_compress, 2),
-        "perf_month": round(perf_month, 1),
-        "monthly_vol": round(monthly_vol, 1),
-        "adr": round(adr, 1),
-        "consolidation_range": round(consolidation_range, 1),
-        "is_consolidating": bool(is_consolidating),
-        "distance_range_high": round(max(distance_range_high, 0), 2),
-        "jours_conso": jours_conso,
-        "breakout": bool(breakout),
-        "range_high": round(range_high, 2),
-        "range_low": round(range_low, 2)
+        "price":              round(current_price, 2),
+        "sma20":              round(sma20, 2),
+        "sma50":              round(sma50, 2),
+        "sma20_trending_up":  bool(sma20 > sma20_prev),
+        "sma50_trending_up":  bool(sma50 > sma50_prev),
+        "rsi":                round(rsi, 1),
+        "rel_volume":         round(rel_volume, 2),
+        "vol_compress":       round(vol_compress, 2),
+        "perf_month":         round(perf_month, 1),
+        "monthly_vol":        round(monthly_vol, 1),
+        "adr":                round(adr, 1),
+        "consolidation_range":round(consolidation_range, 1),
+        "is_consolidating":   bool(is_consolidating),
+        "distance_range_high":round(max(distance_range_high, 0), 2),
+        "jours_conso":        jours_conso,
+        "breakout":           bool(breakout),
+        "range_high":         round(range_high, 2),
+        "range_low":          round(range_low, 2)
     }
 
 # ============================================================
@@ -251,74 +249,79 @@ def calculate_breakout_score(ind: dict) -> tuple[int, list]:
     dist = ind["distance_range_high"]
     if dist <= 1.0:
         score += 3
-        details.append(f"Prix a {dist}% du range high (IMMINENT)")
+        details.append(f"📍 Prix a {dist}% du range high — IMMINENT")
     elif dist <= 2.5:
         score += 2
-        details.append(f"Prix a {dist}% du range high (TRES PROCHE)")
+        details.append(f"📍 Prix a {dist}% du range high — TRES PROCHE")
     elif dist <= 5.0:
         score += 1
-        details.append(f"Prix a {dist}% du range high (PROCHE)")
+        details.append(f"📍 Prix a {dist}% du range high — PROCHE")
     else:
-        details.append(f"Prix a {dist}% du range high (LOIN)")
+        details.append(f"📍 Prix a {dist}% du range high — LOIN")
 
     compress = ind["vol_compress"]
     if compress <= 0.6:
         score += 2
-        details.append(f"Volume compresse a {int(compress*100)}% (FORTE TENSION)")
+        details.append(f"📉 Volume compresse a {int(compress*100)}% — FORTE TENSION")
     elif compress <= 0.8:
         score += 1
-        details.append(f"Volume compresse a {int(compress*100)}% (TENSION)")
+        details.append(f"📉 Volume compresse a {int(compress*100)}% — TENSION")
     else:
-        details.append(f"Volume normal ({int(compress*100)}%)")
+        details.append(f"📊 Volume normal ({int(compress*100)}%)")
 
     jours = ind["jours_conso"]
     if 5 <= jours <= 10:
         score += 2
-        details.append(f"Consolidation ideale : {jours} jours")
+        details.append(f"📅 Consolidation ideale : {jours} jours")
     elif 3 <= jours < 5:
         score += 1
-        details.append(f"Consolidation courte : {jours} jours")
+        details.append(f"📅 Consolidation courte : {jours} jours")
     elif jours > 10:
         score += 1
-        details.append(f"Consolidation longue : {jours} jours")
+        details.append(f"📅 Consolidation longue : {jours} jours")
     else:
-        details.append(f"Consolidation trop courte : {jours} jours")
+        details.append(f"📅 Consolidation trop courte : {jours} jours")
 
     conso = ind["consolidation_range"]
     if conso <= 4:
         score += 2
-        details.append(f"Range tres serre : {conso}% (PARFAIT)")
+        details.append(f"📐 Range tres serre : {conso}% — PARFAIT")
     elif conso <= 6:
         score += 1
-        details.append(f"Range serre : {conso}%")
+        details.append(f"📐 Range serre : {conso}%")
     else:
-        details.append(f"Range large : {conso}%")
+        details.append(f"📐 Range large : {conso}%")
 
     if ind["sma20_trending_up"] and ind["sma50_trending_up"]:
         score += 1
-        details.append("SMA20 & SMA50 pointent vers le haut")
+        details.append(f"📈 SMA20 & SMA50 pointent vers le haut")
     else:
-        details.append("SMA pas encore idealement alignees")
+        details.append(f"📉 SMA pas encore alignees")
 
     return score, details
 
 def score_label(score: int) -> str:
     if score >= 9:
-        return "BREAKOUT IMMINENT"
+        return "🔥 BREAKOUT IMMINENT"
     elif score >= 7:
-        return "TRES PROCHE"
+        return "⚡ TRES PROCHE"
     elif score >= 5:
-        return "A SURVEILLER"
+        return "👀 A SURVEILLER"
     else:
-        return "PAS ENCORE PRET"
+        return "⏳ PAS ENCORE PRET"
+
+def score_bar(score: int) -> str:
+    filled = "█" * score
+    empty  = "░" * (10 - score)
+    return f"{filled}{empty} {score}/10"
 
 # ============================================================
-# ANALYSE CLAUDE + DONNÉES YAHOO
+# ANALYSE CLAUDE
 # ============================================================
 def analyse_claude(symbol: str, fund: dict) -> str:
     prompt = f"""Tu es un expert en Swing Trading sur Small Caps US. Analyse l'action [{symbol}] selon ma strategie stricte. Ne me donne pas de conseils financiers, donne-moi un diagnostic factuel.
 
-Voici les donnees reelles de l'action :
+Donnees reelles Yahoo Finance :
 - Secteur : {fund['sector']} | Industrie : {fund['industry']}
 - Market Cap : {fund['market_cap']}
 - Croissance revenus : {fund['revenue_growth']}
@@ -326,18 +329,13 @@ Voici les donnees reelles de l'action :
 - Ownership institutionnel : {fund['inst_ownership']}
 - Short Float : {fund['short_float']}
 - Prochain Earnings : {fund['earnings_date']}
-- News recentes : {fund['news_summary']}
+- News recentes : {' | '.join(fund['news_items']) if fund['news_items'] else 'Aucune'}
 
-Sur la base de ces donnees reelles :
-1. Les institutions sont-elles acheteuses ou vendeuses ?
-2. Le calendrier Earnings represente-t-il un risque cette semaine ?
-3. Y a-t-il un catalyseur news identifiable ou c'est purement technique ?
-
-Format STRICT :
+Format STRICT de reponse :
 SCORE DE CONFIANCE : /10
-INSTITUTIONS : [Achat/Vente/Neutre]
-RISQUE CALENDRIER : {fund['earnings_date']}
-CATALYSEUR : [Resume en 1 phrase]
+INSTITUTIONS : [Achat / Vente / Neutre]
+RISQUE CALENDRIER : [Date + niveau de risque]
+CATALYSEUR : [News specifique ou Technique pur]
 VERDICT : [GO / ATTENDRE / REJET] car [Raison courte]"""
 
     try:
@@ -364,14 +362,16 @@ def mode_dimanche():
     print(f"{'='*55}")
 
     send_telegram(
-        f"*Analyse dominicale en cours...*\n"
-        f"Scoring de tes {len(tickers)} actions Finviz.\n"
-        f"Classement complet dans quelques minutes !"
+        f"🔍 *ANALYSE DOMINICALE*\n"
+        f"{'─'*30}\n"
+        f"Scoring de tes *{len(tickers)} actions* Finviz\n"
+        f"Classement par proximite de breakout\n\n"
+        f"⏳ _Patiente quelques minutes..._"
     )
 
     reset_alerted()
-    resultats  = []
-    erreurs    = []
+    resultats = []
+    erreurs   = []
 
     for i, symbol in enumerate(tickers):
         print(f"  [{i+1}/{len(tickers)}] {symbol}...")
@@ -409,63 +409,94 @@ def mode_dimanche():
 
     resultats.sort(key=lambda x: x["score"], reverse=True)
 
-    # 1. Classement rapide
-    classement  = f"*CLASSEMENT BREAKOUT — {now.strftime('%d/%m/%Y')}*\n"
-    classement += f"_{len(resultats)} actions analysees_\n\n"
-    numeros     = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+    # ── 1. CLASSEMENT RAPIDE ──
+    numeros = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+
+    classement  = f"🏆 *CLASSEMENT BREAKOUT*\n"
+    classement += f"📅 {now.strftime('%d/%m/%Y')} — {len(resultats)} actions\n"
+    classement += f"{'─'*30}\n\n"
 
     for i, r in enumerate(resultats):
-        num   = numeros[i] if i < len(numeros) else f"{i+1}."
-        fire  = "🔥" if r["score"] >= 7 else ("⚡" if r["score"] >= 5 else "👀")
-        brk   = " ⚠️ BREAKOUT" if r["breakout"] else ""
+        num  = numeros[i] if i < len(numeros) else f"{i+1}."
+        brk  = " 🚨" if r["breakout"] else ""
         classement += (
-            f"{num} *{r['symbol']}* — {r['score']}/10 {fire} {score_label(r['score'])}{brk}\n"
-            f"     ${r['ind']['price']} | "
-            f"A {r['ind']['distance_range_high']}% du breakout | "
-            f"{r['ind']['jours_conso']}j conso\n"
+            f"{num} *{r['symbol']}*{brk}\n"
+            f"     {score_bar(r['score'])} {score_label(r['score'])}\n"
+            f"     💲{r['ind']['price']} │ "
+            f"🎯 {r['ind']['distance_range_high']}% du top │ "
+            f"🕐 {r['ind']['jours_conso']}j\n\n"
         )
 
     send_telegram(classement)
     time.sleep(2)
 
-    # 2. Fiche complete
+    # ── 2. FICHE COMPLETE DE CHAQUE ACTION ──
     for r in resultats:
         s    = r["symbol"]
         ind  = r["ind"]
         fund = r["fund"]
-        det  = "\n".join([f"  • {d}" for d in r["details"]])
-        brk  = "⚠️ DEJA EN BREAKOUT\n\n" if r["breakout"] else ""
+        det  = "\n".join(r["details"])
+
+        sma20_arrow = "↑" if ind["sma20_trending_up"] else "↓"
+        sma50_arrow = "↑" if ind["sma50_trending_up"] else "↓"
+        earn_risk   = " ⚠️ RISQUE" if fund["earnings_risk"] else " ✅"
+
+        # News
+        news_str = ""
+        if fund["news_items"]:
+            news_str = "\n".join([f"  • {n[:70]}..." for n in fund["news_items"]])
+        else:
+            news_str = "  • Aucune news recente"
 
         msg = (
-            f"*{s}* — Score {r['score']}/10 — {score_label(r['score'])}\n"
-            f"{brk}"
-            f"\n*Proximite breakout :*\n{det}\n\n"
-            f"*Technique :*\n"
-            f"Prix: ${ind['price']} | RSI: {ind['rsi']}\n"
-            f"Range: ${ind['range_low']} → ${ind['range_high']}\n"
-            f"Conso: {ind['consolidation_range']}% sur {ind['jours_conso']}j\n"
-            f"SMA20: {'↑' if ind['sma20_trending_up'] else '↓'} | "
-            f"SMA50: {'↑' if ind['sma50_trending_up'] else '↓'}\n"
-            f"Perf mois: +{ind['perf_month']}% | ADR: {ind['adr']}%\n\n"
-            f"*Fondamentaux (Yahoo Finance) :*\n"
-            f"Secteur: {fund['sector']}\n"
-            f"Market Cap: {fund['market_cap']} | Short: {fund['short_float']}\n"
-            f"Revenus: {fund['revenue_growth']} | Benefices: {fund['earnings_growth']}\n"
-            f"Institutions: {fund['inst_ownership']}\n"
-            f"Earnings: {fund['earnings_date']}\n"
-            f"News: {fund['news_summary'][:100]}...\n\n"
-            f"*Analyse IA :*\n{r['analyse']}\n\n"
-            f"_RS Line a verifier sur Finviz !_"
+            f"{'─'*32}\n"
+            f"📊 *{s}* — {score_label(r['score'])}\n"
+            f"{'─'*32}\n\n"
+
+            f"*🎯 SCORE BREAKOUT*\n"
+            f"`{score_bar(r['score'])}`\n"
+            f"{det}\n\n"
+
+            f"*📈 TECHNIQUE*\n"
+            f"💲 Prix : *${ind['price']}*\n"
+            f"⚡ RSI : {ind['rsi']} │ Vol : {ind['rel_volume']}x\n"
+            f"📏 SMA20 {sma20_arrow} ${ind['sma20']} │ SMA50 {sma50_arrow} ${ind['sma50']}\n"
+            f"📦 Range : ${ind['range_low']} → ${ind['range_high']}\n"
+            f"⏳ Conso : {ind['consolidation_range']}% sur {ind['jours_conso']} jours\n"
+            f"🔥 Perf mois : +{ind['perf_month']}% │ ADR : {ind['adr']}%\n\n"
+
+            f"*💼 FONDAMENTAUX*\n"
+            f"🏭 {fund['sector']} — {fund['industry']}\n"
+            f"💰 Market Cap : {fund['market_cap']}\n"
+            f"🏦 Institutions : {fund['inst_ownership']}\n"
+            f"📉 Short Float : {fund['short_float']}\n"
+            f"📊 Rev : {fund['revenue_growth']} │ EPS : {fund['earnings_growth']}\n"
+            f"📅 Earnings : {fund['earnings_date']}{earn_risk}\n\n"
+
+            f"*📰 NEWS RECENTES*\n"
+            f"{news_str}\n\n"
+
+            f"*🤖 ANALYSE IA*\n"
+            f"{r['analyse']}\n\n"
+
+            f"_✅ Verifie la RS Line sur Finviz avant d'entrer !_"
         )
         send_telegram(msg)
         time.sleep(3)
 
+    # ── 3. RESUME FINAL ──
     top3 = [r["symbol"] for r in resultats[:3]]
     send_telegram(
-        f"*Analyse terminee !*\n\n"
-        f"Top 3 cette semaine :\n"
-        f"*{' | '.join(top3)}*\n\n"
-        f"Surveillance automatique lundi-vendredi !"
+        f"✅ *ANALYSE TERMINEE !*\n"
+        f"{'─'*30}\n\n"
+        f"🏅 *Top 3 de la semaine :*\n"
+        f"🥇 {resultats[0]['symbol']} — {score_label(resultats[0]['score'])}\n"
+        f"🥈 {resultats[1]['symbol'] if len(resultats) > 1 else '—'}\n"
+        f"🥉 {resultats[2]['symbol'] if len(resultats) > 2 else '—'}\n\n"
+        f"🤖 _Le bot surveille automatiquement_\n"
+        f"_du lundi au vendredi toutes les 30min._\n"
+        f"_Tu recevras une alerte des qu'un_\n"
+        f"_breakout est confirme !_ 🚀"
     )
 
     print(f"\nMode dimanche termine ! {len(resultats)} actions scorees.")
@@ -503,21 +534,43 @@ def mode_surveillance():
             fund    = get_fundamentals(symbol)
             analyse = analyse_claude(symbol, fund)
 
+            sma20_arrow = "↑" if ind["sma20_trending_up"] else "↓"
+            sma50_arrow = "↑" if ind["sma50_trending_up"] else "↓"
+            earn_risk   = " ⚠️ RISQUE ELEVE" if fund["earnings_risk"] else " ✅ OK"
+
+            news_str = ""
+            if fund["news_items"]:
+                news_str = "\n".join([f"  • {n[:70]}..." for n in fund["news_items"]])
+            else:
+                news_str = "  • Aucune news recente"
+
             message = (
-                f"\U0001F6A8 *BREAKOUT CONFIRME : {symbol}*\n"
-                f"\u23F0 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
-                f"\U0001F4CA *TECHNIQUE*\n"
-                f"Prix: ${ind['price']} | RSI: {ind['rsi']}\n"
-                f"Volume: {ind['rel_volume']}x la normale\n"
-                f"SMA20 {'↑' if ind['sma20_trending_up'] else '↓'} | SMA50 {'↑' if ind['sma50_trending_up'] else '↓'}\n"
-                f"Cassure: ${ind['range_high']} explose !\n\n"
-                f"\U0001F4C8 *FONDAMENTAUX*\n"
-                f"Earnings: {fund['earnings_date']}\n"
-                f"Institutions: {fund['inst_ownership']}\n"
-                f"News: {fund['news_summary'][:80]}...\n\n"
-                f"\U0001F9E0 *ANALYSE IA*\n"
+                f"🚨🚨 *BREAKOUT CONFIRME* 🚨🚨\n"
+                f"{'─'*32}\n"
+                f"📊 *{symbol}*\n"
+                f"🕐 {now.strftime('%d/%m/%Y à %H:%M')}\n"
+                f"{'─'*32}\n\n"
+
+                f"*📈 TECHNIQUE*\n"
+                f"💲 Prix : *${ind['price']}*\n"
+                f"⚡ RSI : {ind['rsi']}\n"
+                f"📦 Volume : *{ind['rel_volume']}x* la normale 🔥\n"
+                f"📏 SMA20 {sma20_arrow} │ SMA50 {sma50_arrow}\n"
+                f"💥 Cassure du range : *${ind['range_high']}*\n"
+                f"📐 Perf mois : +{ind['perf_month']}%\n\n"
+
+                f"*💼 FONDAMENTAUX*\n"
+                f"🏦 Institutions : {fund['inst_ownership']}\n"
+                f"📅 Earnings : {fund['earnings_date']}{earn_risk}\n\n"
+
+                f"*📰 NEWS*\n"
+                f"{news_str}\n\n"
+
+                f"*🤖 ANALYSE IA*\n"
                 f"{analyse}\n\n"
-                f"_Confirme l'entree sur le 30min !_"
+
+                f"{'─'*32}\n"
+                f"_⚡ Confirme l'entree sur le graphique 30min !_"
             )
             send_telegram(message)
 
@@ -554,9 +607,13 @@ def main():
             reset_alerted()
 
         send_telegram(
-            f"*TradingBot actif !*\n"
-            f"Surveillance de ta watchlist en cours.\n"
-            f"Alerte immediate des qu'un breakout est confirme !"
+            f"🤖 *TRADINGBOT ACTIF*\n"
+            f"{'─'*30}\n"
+            f"📋 Watchlist chargee\n"
+            f"🔍 Scan toutes les 30 minutes\n"
+            f"🚨 Alerte immediate au breakout !\n"
+            f"{'─'*30}\n"
+            f"_Bonne journee, je surveille pour toi_ 💪"
         )
 
         mode_surveillance()
