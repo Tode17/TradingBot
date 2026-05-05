@@ -579,14 +579,14 @@ def resume_fin_journee():
 # ============================================================
 # MODE DIMANCHE
 # ============================================================
-def mode_dimanche():
+def mode_mardi():
     now     = datetime.now()
     tickers = load_watchlist()
     if not tickers:
         return
 
     print(f"\n{'='*55}")
-    print(f"MODE DIMANCHE — Scoring VCP de {len(tickers)} actions")
+    print(f"MODE mardi — Scoring VCP de {len(tickers)} actions")
     print(f"{'='*55}")
 
     send_telegram(
